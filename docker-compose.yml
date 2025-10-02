@@ -1,0 +1,222 @@
+version: '3.8'
+
+services:
+  # Database Services
+  postgres:
+    image: postgres:15
+    container_name: linkedin-networking-postgres
+    environment:
+      POSTGRES_DB: linkedin_networking
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - linkedin-networking
+
+  redis:
+    image: redis:7-alpine
+    container_name: linkedin-networking-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - linkedin-networking
+
+  elasticsearch:
+    image: elasticsearch:8.8.0
+    container_name: linkedin-networking-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - linkedin-networking
+
+  # Backend Services
+  api-gateway:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.gateway
+    container_name: linkedin-networking-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - REDIS_URL=redis://redis:6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - linkedin-networking
+
+  user-service:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.user-service
+    container_name: linkedin-networking-user-service
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - linkedin-networking
+
+  profile-service:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.profile-service
+    container_name: linkedin-networking-profile-service
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=linkedin-networking-storage
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - linkedin-networking
+
+  company-service:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.company-service
+    container_name: linkedin-networking-company-service
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - postgres
+      - elasticsearch
+    networks:
+      - linkedin-networking
+
+  recommendation-service:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.recommendation-service
+    container_name: linkedin-networking-recommendation-service
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - REDIS_URL=redis://redis:6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - linkedin-networking
+
+  connection-service:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.connection-service
+    container_name: linkedin-networking-connection-service
+    ports:
+      - "8005:8005"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - linkedin-networking
+
+  analytics-service:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile.analytics-service
+    container_name: linkedin-networking-analytics-service
+    ports:
+      - "8006:8006"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/linkedin_networking
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - postgres
+      - elasticsearch
+    networks:
+      - linkedin-networking
+
+  # Frontend Services
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    container_name: linkedin-networking-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - api-gateway
+    networks:
+      - linkedin-networking
+
+  # Monitoring Services
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: linkedin-networking-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployment/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - linkedin-networking
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: linkedin-networking-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - linkedin-networking
+
+  # Development Tools
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: linkedin-networking-pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@linkedin-networking.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    depends_on:
+      - postgres
+    networks:
+      - linkedin-networking
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+  grafana_data:
+
+networks:
+  linkedin-networking:
+    driver: bridge
